@@ -9,7 +9,8 @@ import os
 app = Flask(__name__)
 load_dotenv()
 
-openai.api_key = os.getenv('OPENAI_API_KEY')
+# Initialize OpenAI client
+client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 # Function to extract text from PDF
 def extract_text_from_pdf(pdf_path):
@@ -48,20 +49,35 @@ def trim_text_to_token_limit(text, max_tokens=9000):
     trimmed_text = " ".join(tokens[:max_tokens])
     return trimmed_text
 
-# Load the data once when the server starts
-file_path = "D:\\Private\\BoomAI\\data_50.csv"  # Hardcoded file path
-combined_data = ""
-data = None
+# Function to process a single file
+def process_file(file_path):
+    if file_path.lower().endswith('.pdf'):
+        return extract_text_from_pdf(file_path)
+    elif file_path.lower().endswith('.docx'):
+        return extract_text_from_docx(file_path)
+    elif file_path.lower().endswith(('.csv', '.xlsx')):
+        data = extract_data_from_csv_excel(file_path)
+        return data.to_csv(index=False)
+    return None
 
-if file_path.lower().endswith('.pdf'):
-    combined_data = extract_text_from_pdf(file_path)
-elif file_path.lower().endswith('.docx'):
-    combined_data = extract_text_from_docx(file_path)
-elif file_path.lower().endswith(('.csv', '.xlsx')):
-    data = extract_data_from_csv_excel(file_path)
-    combined_data = data.to_csv(index=False)
-else:
-    raise ValueError("Unsupported file type. Please provide a PDF, DOCX, CSV, or Excel file.")
+# Load all supported files from the data folder
+data_folder = "D:\\Private\\Fiv\\bot\\ChatBot-GPT4API\\data" 
+combined_data = ""
+
+for filename in os.listdir(data_folder):
+    file_path = os.path.join(data_folder, filename)
+    if os.path.isfile(file_path) and filename.lower().endswith(('.pdf', '.docx', '.csv', '.xlsx')):
+        try:
+            file_content = process_file(file_path)
+            if file_content:
+                combined_data += f"\nContent from {filename}:\n{file_content}\n"
+                print(f"Successfully processed: {filename}")
+        except Exception as e:
+            print(f"Error processing {filename}: {e}")
+            continue
+
+if not combined_data:
+    raise ValueError("No supported files found in the data folder. Please provide PDF, DOCX, CSV, or Excel files.")
 
 # Check the token count and trim if necessary
 token_count = estimate_token_count(combined_data)
@@ -71,7 +87,7 @@ if token_count > 9000:
 
 # Prepare initial messages for GPT-4
 messages = [
-    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "system", "content": "You are an educational assistant from Hamza Corporation. Your role is to provide comprehensive answers to academic queries using both the provided educational data and your general knowledge. Be proactive in understanding the student's interests and learning goals. When interacting: 1) Introduce yourself as a Hamza Corporation educational advisor, 2) Provide detailed, well-structured explanations, 3) Ask follow-up questions to better understand the student's needs, 4) Suggest related topics they might be interested in, 5) Maintain a supportive and encouraging tone. If a question is unclear, ask for clarification to ensure you provide the most relevant and helpful response."},
     {"role": "user", "content": f"Here is the data:\n{combined_data} now user will ask questions from the data"}
 ]
 
@@ -84,13 +100,16 @@ def ask_question():
     messages.append({"role": "user", "content": user_question})
 
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
-            messages=messages
+            messages=messages,
+            max_tokens=1000
         )
-        output_text = response.choices[0].message['content']
+        output_text = response.choices[0].message.content
+        messages.append({"role": "assistant", "content": output_text})
         return jsonify({'status': 'success', 'answer': output_text})
     except Exception as e:
+        print(f"OpenAI API Error: {str(e)}")
         return jsonify({'status': 'fail', 'message': str(e)}), 500
 
 if __name__ == '__main__':
