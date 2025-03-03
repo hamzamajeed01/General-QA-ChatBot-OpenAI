@@ -1,1 +1,1 @@
-# BoomAI-ChatBot
+# General QA chatbot
